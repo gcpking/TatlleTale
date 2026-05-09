@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tattletale — Parent Dashboard</title>
+
+  <!-- Firebase compat SDK (no module imports needed) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" onerror="document.body.innerHTML='<p style=padding:40px;color:red;font-size:20px>Firebase failed to load. Check your internet connection.</p>'"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    :root { --purple: #6C47FF; --green: #22C55E; --red: #EF4444; --amber: #F59E0B; --bg: #F7F5FF; }
+    body { background: var(--bg); min-height: 100vh; }
+    .screen { display: none; }
+    .screen.active { display: flex; }
+    #screen-auth, #screen-setup { align-items: center; justify-content: center; min-height: 100vh; background: var(--purple); }
+    .card { background: white; border-radius: 20px; padding: 32px; width: 100%; max-width: 380px; }
+    .card h1 { font-size: 26px; font-weight: 800; color: var(--purple); margin-bottom: 4px; }
+    .card p { color: #888; margin-bottom: 20px; font-size: 14px; }
+    input, select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 10px; font-size: 15px; margin-bottom: 12px; background: white; }
+    .btn { width: 100%; padding: 14px; background: var(--purple); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
+    .btn-outline { background: transparent; border: 2px solid var(--purple); color: var(--purple); }
+    .msg { font-size: 13px; margin-bottom: 10px; padding: 8px 12px; border-radius: 8px; }
+    .msg-error { background: #FEE2E2; color: var(--red); }
+    .msg-info { background: #EEF2FF; color: var(--purple); }
+    #screen-app { flex-direction: column; min-height: 100vh; }
+    header { background: var(--purple); color: white; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 20px; font-weight: 700; }
+    header small { font-size: 12px; opacity: 0.7; display: block; margin-top: 2px; }
+    .logout-btn { background: none; border: 1px solid rgba(255,255,255,0.4); color: white; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+    .tabs { display: flex; background: #5A3AE0; }
+    .tab { flex: 1; padding: 12px; text-align: center; color: rgba(255,255,255,0.6); font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent; }
+    .tab.active { color: white; border-bottom-color: white; }
+    main { padding: 20px; max-width: 700px; margin: 0 auto; width: 100%; }
+    .section-title { font-size: 18px; font-weight: 700; margin: 20px 0 12px; }
+    .pending-card { background: #FFF3CD; border: 1px solid var(--amber); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .pending-card h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+    .reason { font-size: 14px; color: #555; margin-bottom: 8px; font-style: italic; }
+    .pending-meta { font-size: 12px; color: #888; margin-bottom: 12px; }
+    .flag { display: inline-block; background: #FEE2E2; color: var(--red); font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; margin: 0 2px; }
+    .actions { display: flex; gap: 10px; }
+    .approve-btn { background: var(--green); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; flex: 1; }
+    .deny-btn { background: var(--red); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; flex: 1; }
+    .log-entry { background: white; border-radius: 10px; padding: 14px; margin-bottom: 8px; border-left: 4px solid #ddd; font-size: 14px; line-height: 1.5; }
+    .log-entry.approved { border-left-color: var(--green); }
+    .log-entry.denied { border-left-color: var(--red); }
+    .log-entry.flagged { border-left-color: var(--amber); }
+    .empty { color: #aaa; text-align: center; padding: 32px; }
+    .code-box { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    .family-code { font-size: 28px; font-weight: 800; letter-spacing: 6px; color: var(--purple); font-family: monospace; }
+    .spinner { text-align: center; padding: 40px; color: #aaa; }
+  </style>
+</head>
+<body>
+
+<div id="screen-auth" class="screen active">
+  <div class="card">
+    <h1>Tattletale</h1>
+    <p>Parent dashboard</p>
+    <div id="auth-msg"></div>
+    <input id="email" type="email" placeholder="Email address">
+    <input id="password" type="password" placeholder="Password">
+    <button class="btn" onclick="doLogin()">Sign in</button>
+    <button class="btn btn-outline" onclick="showRegister()">Create account</button>
+    <button onclick="resetPassword()" style="background:none;border:none;color:#888;font-size:13px;cursor:pointer;margin-top:4px;width:100%;">Forgot password?</button>
+    <div id="reg-extra" style="display:none; margin-top:16px; border-top:1px solid #eee; padding-top:16px;">
+      <input id="reg-name" placeholder="Your name">
+      <select id="reg-title">
+        <option value="Mr">Mr</option>
+        <option value="Mrs">Mrs</option>
+        <option value="Dr">Dr</option>
+      </select>
+      <input id="reg-code" placeholder="Family code (blank = create new family)">
+      <button class="btn" onclick="doRegister()">Create account</button>
+    </div>
+  </div>
+</div>
+
+<div id="screen-setup" class="screen">
+  <div class="card">
+    <h1>One more thing</h1>
+    <p>Tell us a bit about yourself to finish setup.</p>
+    <div id="setup-msg"></div>
+    <input id="setup-name" placeholder="Your name">
+    <select id="setup-title">
+      <option value="Mr">Mr</option>
+      <option value="Mrs">Mrs</option>
+      <option value="Dr">Dr</option>
+    </select>
+    <input id="setup-code" placeholder="Family code (blank = create new family)">
+    <button class="btn" onclick="doSetup()">Continue</button>
+  </div>
+</div>
+
+<div id="screen-app" class="screen">
+  <header>
+    <div>
+      <h1 id="greeting">Tattletale</h1>
+      <small id="code-display"></small>
+    </div>
+    <button class="logout-btn" onclick="doLogout()">Sign out</button>
+  </header>
+  <div class="tabs" id="tabs"></div>
+  <main id="main"><div class="spinner">Loading...</div></main>
+</div>
+
+<script>
+  firebase.initializeApp({
+    apiKey: 'AIzaSyDn_iWwCgTIXq1gDzhC3BHR8I5scfF-MFA',
+    authDomain: 'tatletale-16660.firebaseapp.com',
+    projectId: 'tatletale-16660',
+    storageBucket: 'tatletale-16660.firebasestorage.app',
+    messagingSenderId: '435792798131',
+    appId: '1:435792798131:web:17d9cfbb997daca71f6bc6'
+  });
+
+  const auth = firebase.auth();
+  const db   = firebase.firestore();
+
+  let familyId = null, children = [], childIdx = 0, unsub = null;
+
+  function show(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  function setMsg(id, text, type) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'msg msg-' + type;
+  }
+
+  window.addChild = async function() {
+    const name = document.getElementById('child-name').value.trim();
+    const avatar = document.getElementById('child-avatar').value;
+    if (!name) return;
+    const childId = name.toLowerCase().replace(/\s+/g, '_') + '_' + Date.now();
+    await db.collection('families').doc(familyId).collection('children').doc(childId).set({ name, avatar });
+    loadChildren();
+  };
+
+  function randCode() {
+    return Math.random().toString(36).substring(2,8).toUpperCase();
+  }
+
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  auth.onAuthStateChanged(async user => {
+    if (!user) { show('screen-auth'); return; }
+    const snap = await db.collection('parents').doc(user.uid).get();
+    if (!snap.exists) { show('screen-setup'); return; }
+    const d = snap.data();
+    familyId = d.familyId;
+    document.getElementById('greeting').textContent = d.title + ' ' + d.name;
+    document.getElementById('code-display').textContent = 'Family code: ' + familyId;
+    show('screen-app');
+    loadChildren();
+  });
+
+  // ── Login ───────────────────────────────────────────────────────────────────
+  // Confirm JS is running
+  document.getElementById('auth-msg').textContent = 'Ready.';
+  document.getElementById('auth-msg').className = 'msg msg-info';
+
+  function doLogin() {
+    const email = document.getElementById('email').value.trim();
+    const pass  = document.getElementById('password').value;
+    if (!email || !pass) { setMsg('auth-msg','Enter email and password.','error'); return; }
+    setMsg('auth-msg','Signing in...','info');
+    auth.signInWithEmailAndPassword(email, pass)
+      .catch(e => setMsg('auth-msg', 'Wrong email or password.', 'error'));
+  }
+
+  function resetPassword() {
+    const email = document.getElementById('email').value.trim();
+    if (!email) { setMsg('auth-msg', 'Enter your email address first.', 'error'); return; }
+    auth.sendPasswordResetEmail(email)
+      .then(() => setMsg('auth-msg', 'Reset email sent! Check your inbox.', 'info'))
+      .catch(e => setMsg('auth-msg', e.message, 'error'));
+  }
+
+  function showRegister() {
+    document.getElementById('reg-extra').style.display = 'block';
+  }
+
+  function doRegister() {
+    const email = document.getElementById('email').value.trim();
+    const pass  = document.getElementById('password').value;
+    const name  = document.getElementById('reg-name').value.trim();
+    const title = document.getElementById('reg-title').value;
+    const code  = document.getElementById('reg-code').value.trim().toUpperCase() || randCode();
+    if (!email || !pass || !name) { setMsg('auth-msg','Fill in all fields.','error'); return; }
+    setMsg('auth-msg','Creating account...','info');
+    auth.createUserWithEmailAndPassword(email, pass)
+      .then(async cred => {
+        await db.collection('families').doc(code).set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        await db.collection('parents').doc(cred.user.uid).set({ name, title, familyId: code });
+      })
+      .catch(e => setMsg('auth-msg', e.message, 'error'));
+  }
+
+  // ── Setup (no profile doc) ──────────────────────────────────────────────────
+  function doSetup() {
+    const name  = document.getElementById('setup-name').value.trim();
+    const title = document.getElementById('setup-title').value;
+    const code  = document.getElementById('setup-code').value.trim().toUpperCase() || randCode();
+    if (!name) { setMsg('setup-msg','Enter your name.','error'); return; }
+    setMsg('setup-msg','Saving...','info');
+    const uid = auth.currentUser.uid;
+    db.collection('families').doc(code).set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+      .then(() => db.collection('parents').doc(uid).set({ name, title, familyId: code }))
+      .catch(e => setMsg('setup-msg', e.message, 'error'));
+  }
+
+  function doLogout() { auth.signOut(); }
+
+  // ── Children ────────────────────────────────────────────────────────────────
+  async function loadChildren() {
+    const snap = await db.collection('families').doc(familyId).collection('children').get();
+    children = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderTabs();
+    if (children.length > 0) renderChild(0);
+    else document.getElementById('main').innerHTML = `
+      <p class="empty">No children added yet.</p>
+      <div style="max-width:400px;margin:0 auto;background:white;border-radius:12px;padding:20px;">
+        <div style="font-weight:700;font-size:16px;margin-bottom:12px;">Add a child</div>
+        <input id="child-name" placeholder="Child's name" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:10px;">
+        <select id="child-avatar" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:10px;">
+          <option value="👦">👦 Boy</option>
+          <option value="👧">👧 Girl</option>
+          <option value="🧒">🧒 Child</option>
+        </select>
+        <button onclick="addChild()" style="width:100%;padding:14px;background:#6C47FF;color:white;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;">Add child</button>
+      </div>`;
+  }
+
+  function renderTabs() {
+    document.getElementById('tabs').innerHTML = children.map((c,i) =>
+      `<div class="tab ${i===childIdx?'active':''}" onclick="switchChild(${i})">${c.avatar||'👤'} ${c.name||'Child'}</div>`
+    ).join('');
+  }
+
+  function switchChild(i) { childIdx=i; renderTabs(); renderChild(i); }
+
+  async function renderChild(i) {
+    if (unsub) unsub();
+    document.getElementById('main').innerHTML = '<div class="spinner">Loading...</div>';
+    const child = children[i];
+
+    unsub = db.collection('families').doc(familyId).collection('pendingRequests')
+      .where('childId','==',child.id).where('outcome','==','pending')
+      .onSnapshot(async snap => {
+        const pending = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const log = await loadLog(child.id);
+        // Read liveUsage via REST API — bypasses SDK issues
+        let usageData = null;
+        try {
+          const r = await fetch(`https://firestore.googleapis.com/v1/projects/tatletale-16660/databases/(default)/documents/families/${familyId}`);
+          const j = await r.json();
+          if (j.fields && j.fields.liveUsage) {
+            const apps = j.fields.liveUsage.arrayValue.values.map(v => ({
+              appName: v.mapValue.fields.appName.stringValue,
+              usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
+            }));
+            usageData = { apps };
+          }
+        } catch(e) {}
+        renderDashboard(child, pending, log, usageData);
+      });
+  }
+
+  function buildUsageHtml(data) {
+    if (!data) return '<p class="empty">Waiting for data — Tattletale must be open on the device.</p>';
+    const apps = data.apps || [];
+    const updated = data.lastUpdated?.toDate();
+    const ago = updated ? Math.round((Date.now() - updated.getTime()) / 60000) : null;
+    let html = ago !== null ? `<div style="font-size:12px;color:#aaa;margin-bottom:8px;">Updated ${ago} min ago</div>` : '';
+    if (!apps.length) return html + '<p class="empty">No usage data yet.</p>';
+    apps.slice(0,15).forEach(a => {
+      const mins = a.usageMinutes || 0;
+      const bar = Math.min(100, Math.round(mins / 3));
+      html += `<div style="background:white;border-radius:10px;padding:12px 16px;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-weight:600;font-size:14px;">${a.appName}</span>
+          <span style="color:#888;font-size:13px;">${mins} min</span>
+        </div>
+        <div style="background:#eee;border-radius:4px;height:4px;">
+          <div style="background:var(--purple);width:${bar}%;height:4px;border-radius:4px;"></div>
+        </div>
+      </div>`;
+    });
+    return html;
+  }
+
+  async function loadLog(childId) {
+    const today = new Date().toISOString().slice(0,10);
+    const snap = await db.collection('families').doc(familyId)
+      .collection('children').doc(childId).collection('logs').doc(today).get();
+    if (!snap.exists) return [];
+    return (snap.data().entries||[]).sort((a,b)=>(a.timestamp?.seconds||0)-(b.timestamp?.seconds||0));
+  }
+
+  async function renderDashboard(child, pending, log, usageData) {
+    let html = `<div class="code-box">
+      <div style="font-size:13px;color:#888;margin-bottom:6px;">Family code — share with everyone</div>
+      <div class="family-code">${familyId}</div>
+      <div style="font-size:12px;color:#aaa;margin-top:6px;">Child devices and your partner use this code to connect</div>
+    </div>`;
+
+    if (pending.length) {
+      html += '<div class="section-title">Pending requests</div>';
+      pending.forEach(r => {
+        const flags = (r.flags||[]).map(f=>`<span class="flag">${f}</span>`).join('');
+        html += `<div class="pending-card">
+          <h3>${r.childName} — ${r.appName||'screen time'} ${flags}</h3>
+          <div class="reason">"${r.reason}"</div>
+          ${r.followupAnswer?`<div class="pending-meta">Follow-up: ${r.followupAnswer}</div>`:''}
+          ${r.locationStatus?`<div class="pending-meta">📍 ${r.locationStatus}${r.detectedLocation?' · '+r.detectedLocation:''}</div>`:''}
+          <div class="actions">
+            <button class="approve-btn" onclick="resolve('${r.id}','approved')">✓ Approve</button>
+            <button class="deny-btn" onclick="resolve('${r.id}','denied')">✗ Deny</button>
+          </div>
+        </div>`;
+      });
+    }
+
+    // Live usage section
+    html += `<div class="section-title">📱 Live usage today
+      <button onclick="requestRefresh('${child.id}')" style="float:right;background:var(--purple);color:white;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">↻ Refresh</button>
+    </div>`;
+    html += `<div id="live-usage-section">${buildUsageHtml(usageData)}</div>`;
+
+    // Rules section
+    html += `<div class="section-title">App rules
+      <button onclick="showAddRule('${child.id}')" style="float:right;background:var(--purple);color:white;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">+ Add app</button>
+    </div>`;
+    const rules = await loadRules(child.id);
+    if (!rules.length) html += '<p class="empty" style="margin-bottom:16px;">No rules yet. Add apps to block or flag.</p>';
+    else {
+      rules.forEach((r,i) => {
+        const color = r.category==='blocked'?'var(--red)':r.category==='flagged'?'var(--amber)':'var(--green)';
+        html += `<div style="display:flex;align-items:center;background:white;border-radius:10px;padding:12px 16px;margin-bottom:8px;">
+          <span style="flex:1;font-weight:600;">${r.appName}</span>
+          <span style="background:${color}22;color:${color};font-size:12px;font-weight:700;padding:2px 10px;border-radius:20px;margin-right:10px;">${r.category}</span>
+          <button onclick="deleteRule('${child.id}',${i})" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;">✕</button>
+        </div>`;
+      });
+    }
+
+    html += `<div class="section-title">Today's log
+      <button onclick="createSummary('${child.id}')" style="float:right;background:var(--purple);color:white;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">📋 Create summary</button>
+    </div>`;
+    html += '<div id="summary-section"></div>';
+    if (!log.length) html += '<p class="empty">Nothing logged yet today.</p>';
+    else [...log].reverse().forEach(e => {
+      html += `<div class="log-entry ${e.outcome||''}">${e.text}</div>`;
+    });
+
+    document.getElementById('main').innerHTML = html;
+  }
+
+  async function loadRules(childId) {
+    const snap = await db.collection('families').doc(familyId).collection('children').doc(childId).collection('data').doc('rules').get();
+    if (!snap.exists) return [];
+    return snap.data().apps || [];
+  }
+
+  window.showAddRule = function(childId) {
+    const name = prompt('App name (e.g. Brawl Stars):');
+    if (!name) return;
+    const cat = prompt('Category: blocked / flagged / approved');
+    if (!['blocked','flagged','approved'].includes(cat)) { alert('Must be blocked, flagged, or approved'); return; }
+    const ref = db.collection('families').doc(familyId).collection('children').doc(childId).collection('data').doc('rules');
+    ref.get().then(snap => {
+      const apps = snap.exists ? (snap.data().apps||[]) : [];
+      apps.push({ appName: name, category: cat });
+      ref.set({ apps });
+      renderChild(childIdx);
+    });
+  };
+
+  window.deleteRule = function(childId, idx) {
+    const ref = db.collection('families').doc(familyId).collection('children').doc(childId).collection('data').doc('rules');
+    ref.get().then(snap => {
+      const apps = snap.exists ? (snap.data().apps||[]) : [];
+      apps.splice(idx, 1);
+      ref.set({ apps });
+      renderChild(childIdx);
+    });
+  };
+
+  window.requestRefresh = async function(childId) {
+    const el = document.getElementById('live-usage-section');
+    if (el) el.innerHTML = '<p style="color:#888;font-size:13px;">Refreshing...</p>';
+    // Write refresh request so phone pushes immediately
+    await db.collection('families').doc(familyId)
+      .collection('children').doc(childId).collection('data').doc('refreshRequest')
+      .set({ requestedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    // Wait 3 seconds then re-read directly from Firestore
+    setTimeout(async () => {
+      let data = null;
+      const r = await fetch(`https://firestore.googleapis.com/v1/projects/tatletale-16660/databases/(default)/documents/families/${familyId}`);
+      const j = await r.json();
+      if (j.fields && j.fields.liveUsage) {
+        const apps = j.fields.liveUsage.arrayValue.values.map(v => ({
+          appName: v.mapValue.fields.appName.stringValue,
+          usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
+        }));
+        data = { apps };
+      }
+      if (el) el.innerHTML = buildUsageHtml(data);
+    }, 3000);
+  };
+
+  window.createSummary = async function(childId) {
+    const el = document.getElementById('summary-section');
+    el.innerHTML = '<p style="color:#888;font-size:13px;">Building summary...</p>';
+    const today = new Date().toISOString().slice(0,10);
+    const snap = await db.collection('families').doc(familyId)
+      .collection('children').doc(childId).collection('logs').doc(today).get();
+
+    if (!snap.exists || !(snap.data().entries||[]).length) {
+      el.innerHTML = '<p style="color:#aaa;font-size:13px;">No activity logged today yet.</p>';
+      return;
+    }
+
+    const entries = snap.data().entries.sort((a,b) => (a.timestamp?.seconds||0)-(b.timestamp?.seconds||0));
+    const approved = entries.filter(e=>e.outcome==='approved').length;
+    const denied = entries.filter(e=>e.outcome==='denied').length;
+    const flagged = entries.filter(e=>e.outcome==='flagged').length;
+    const total = entries.length;
+
+    let summary = `<div style="background:white;border-radius:12px;padding:20px;margin-bottom:16px;border-left:4px solid var(--purple);">
+      <div style="font-weight:700;font-size:16px;margin-bottom:12px;">📋 Daily Summary — ${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</div>
+      <div style="color:#555;margin-bottom:12px;">
+        ${total} request${total!==1?'s':''} today —
+        <span style="color:var(--green)">✓ ${approved} approved</span>${denied?' · <span style="color:var(--red)">✗ '+denied+' denied</span>':''}${flagged?' · <span style="color:var(--amber)">⚑ '+flagged+' flagged</span>':''}
+      </div>
+      <div style="border-top:1px solid #eee;padding-top:12px;">`;
+
+    entries.forEach(e => {
+      const dot = e.outcome==='approved'?'🟢':e.outcome==='denied'?'🔴':'🟡';
+      summary += `<div style="margin-bottom:8px;font-size:14px;">${dot} ${e.text}</div>`;
+    });
+
+    summary += '</div></div>';
+    el.innerHTML = summary;
+  };
+
+  function resolve(id, outcome) {
+    db.collection('families').doc(familyId).collection('pendingRequests').doc(id).update({ outcome });
+  }
+</script>
+</body>
+</html>
