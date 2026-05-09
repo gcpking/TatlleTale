@@ -244,30 +244,44 @@
 
   function switchChild(i) { childIdx=i; renderTabs(); renderChild(i); }
 
+  async function fetchLiveUsage() {
+    try {
+      const r = await fetch(`https://firestore.googleapis.com/v1/projects/tatletale-16660/databases/(default)/documents/families/LCKKBO`);
+      const j = await r.json();
+      if (j.fields && j.fields.liveUsage) {
+        return j.fields.liveUsage.arrayValue.values.map(v => ({
+          appName: v.mapValue.fields.appName.stringValue,
+          usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
+        }));
+      }
+    } catch(e) {}
+    return null;
+  }
+
   async function renderChild(i) {
     if (unsub) unsub();
     document.getElementById('main').innerHTML = '<div class="spinner">Loading...</div>';
     const child = children[i];
 
+    // Load everything in parallel
+    const [log, liveApps] = await Promise.all([
+      loadLog(child.id),
+      fetchLiveUsage()
+    ]);
+    const usageData = liveApps ? { apps: liveApps } : null;
+
+    // Render immediately with what we have
+    const pending = [];
+    renderDashboard(child, pending, log, usageData);
+
+    // Then set up live pending requests listener
     unsub = db.collection('families').doc(familyId).collection('pendingRequests')
-      .where('childId','==',child.id).where('outcome','==','pending')
+      .where('outcome','==','pending')
       .onSnapshot(async snap => {
-        const pending = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const log = await loadLog(child.id);
-        // Read liveUsage via REST API — bypasses SDK issues
-        let usageData = null;
-        try {
-          const r = await fetch(`https://firestore.googleapis.com/v1/projects/tatletale-16660/databases/(default)/documents/families/${familyId}`);
-          const j = await r.json();
-          if (j.fields && j.fields.liveUsage) {
-            const apps = j.fields.liveUsage.arrayValue.values.map(v => ({
-              appName: v.mapValue.fields.appName.stringValue,
-              usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
-            }));
-            usageData = { apps };
-          }
-        } catch(e) {}
-        renderDashboard(child, pending, log, usageData);
+        const allPending = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.childId === child.id);
+        const freshLog = await loadLog(child.id);
+        const freshApps = await fetchLiveUsage();
+        renderDashboard(child, allPending, freshLog, freshApps ? { apps: freshApps } : null);
       });
   }
 
