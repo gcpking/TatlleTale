@@ -249,10 +249,13 @@
       const r = await fetch(`https://firestore.googleapis.com/v1/projects/tatletale-16660/databases/(default)/documents/families/LCKKBO`);
       const j = await r.json();
       if (j.fields && j.fields.liveUsage) {
-        return j.fields.liveUsage.arrayValue.values.map(v => ({
+        const apps = j.fields.liveUsage.arrayValue.values.map(v => ({
           appName: v.mapValue.fields.appName.stringValue,
           usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
         }));
+        const tsStr = j.fields.liveUsageUpdated?.timestampValue;
+        const updated = tsStr ? new Date(tsStr) : null;
+        return { apps, updated };
       }
     } catch(e) {}
     return null;
@@ -264,11 +267,11 @@
     const child = children[i];
 
     // Load everything in parallel
-    const [log, liveApps] = await Promise.all([
+    const [log, liveResult] = await Promise.all([
       loadLog(child.id),
       fetchLiveUsage()
     ]);
-    const usageData = liveApps ? { apps: liveApps } : null;
+    const usageData = liveResult ? liveResult : null;
 
     // Render immediately with what we have
     const pending = [];
@@ -280,25 +283,40 @@
       .onSnapshot(async snap => {
         const allPending = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.childId === child.id);
         const freshLog = await loadLog(child.id);
-        const freshApps = await fetchLiveUsage();
-        renderDashboard(child, allPending, freshLog, freshApps ? { apps: freshApps } : null);
+        const freshResult = await fetchLiveUsage();
+        renderDashboard(child, allPending, freshLog, freshResult);
       });
   }
 
   function buildUsageHtml(data) {
     if (!data) return '<p class="empty">Waiting for data — Tattletale must be open on the device.</p>';
     const apps = data.apps || [];
-    const updated = data.lastUpdated?.toDate();
-    const ago = updated ? Math.round((Date.now() - updated.getTime()) / 60000) : null;
-    let html = ago !== null ? `<div style="font-size:12px;color:#aaa;margin-bottom:8px;">Updated ${ago} min ago</div>` : '';
-    if (!apps.length) return html + '<p class="empty">No usage data yet.</p>';
-    apps.slice(0,15).forEach(a => {
+    const updated = data.updated;
+    if (!apps.length) return '<p class="empty">No usage data yet.</p>';
+
+    const totalMins = apps.reduce((sum, a) => sum + (a.usageMinutes || 0), 0);
+    const totalHrs = Math.floor(totalMins / 60);
+    const totalRem = totalMins % 60;
+    const totalStr = totalHrs > 0 ? `${totalHrs}h ${totalRem}m` : `${totalMins}m`;
+
+    const timeStr = updated ? updated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+    const dateStr = updated ? updated.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : null;
+
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="font-size:13px;color:#555;">Total: <strong>${totalStr}</strong></div>
+      ${timeStr ? `<div style="font-size:12px;color:#aaa;">Last updated ${dateStr} at ${timeStr}</div>` : ''}
+    </div>`;
+
+    apps.slice(0, 15).forEach(a => {
       const mins = a.usageMinutes || 0;
-      const bar = Math.min(100, Math.round(mins / 3));
+      const bar = Math.min(100, Math.round((mins / totalMins) * 100));
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      const label = h > 0 ? `${h}h ${m}m` : `${mins}m`;
       html += `<div style="background:white;border-radius:10px;padding:12px 16px;margin-bottom:6px;">
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
           <span style="font-weight:600;font-size:14px;">${a.appName}</span>
-          <span style="color:#888;font-size:13px;">${mins} min</span>
+          <span style="color:#888;font-size:13px;">${label}</span>
         </div>
         <div style="background:#eee;border-radius:4px;height:4px;">
           <div style="background:var(--purple);width:${bar}%;height:4px;border-radius:4px;"></div>
