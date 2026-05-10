@@ -244,15 +244,60 @@
 
   function switchChild(i) { childIdx=i; renderTabs(); renderChild(i); }
 
+  const friendlyNames = {
+    'com.mojang.minecraftpe': 'Minecraft',
+    'com.spotify.music': 'Spotify',
+    'com.google.android.youtube': 'YouTube',
+    'com.whatsapp': 'WhatsApp',
+    'com.supercell.brawlstars': 'Brawl Stars',
+    'com.supercell.clashofclans': 'Clash of Clans',
+    'com.roblox.client': 'Roblox',
+    'com.epicgames.fortnite': 'Fortnite',
+    'com.instagram.android': 'Instagram',
+    'com.snapchat.android': 'Snapchat',
+    'com.zhiliaoapp.musically': 'TikTok',
+    'com.ss.android.ugc.trill': 'TikTok',
+    'com.facebook.katana': 'Facebook',
+    'com.twitter.android': 'X (Twitter)',
+    'com.netflix.mediaclient': 'Netflix',
+    'com.discord': 'Discord',
+    'com.anthropic.claude': 'Claude',
+    'org.thoughtcrime.securesms': 'Signal',
+    'com.android.chrome': 'Chrome',
+    'com.google.android.apps.maps': 'Google Maps',
+    'com.google.android.gm': 'Gmail',
+    'com.google.android.contacts': 'Contacts',
+    'com.google.android.apps.photos': 'Photos',
+    'com.google.android.deskclock': 'Clock',
+    'com.whatsapp': 'WhatsApp',
+    'com.motorola.camera3': 'Camera',
+    'com.google.android.dialer': 'Phone',
+    'com.android.settings': 'Settings',
+  };
+
+  const hiddenPackages = [
+    'com.android.systemui','com.google.android.gms','com.google.android.gms.supervision',
+    'com.motorola.launcher3','com.android.launcher3','com.google.android.apps.nexuslauncher',
+    'com.glance.lockscreenM','com.motorola.ccc.ota','com.android.vending',
+    'com.google.android.gsf','com.google.android.inputmethod.latin',
+  ];
+
   async function fetchLiveUsage() {
     try {
       const r = await fetch(`https://firestore.googleapis.com/v1/projects/tatletale-16660/databases/(default)/documents/families/LCKKBO`);
       const j = await r.json();
       if (j.fields && j.fields.liveUsage) {
-        const apps = j.fields.liveUsage.arrayValue.values.map(v => ({
-          appName: v.mapValue.fields.appName.stringValue,
-          usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
-        }));
+        const apps = j.fields.liveUsage.arrayValue.values
+          .map(v => {
+            const pkg = v.mapValue.fields.packageName?.stringValue || '';
+            const rawName = v.mapValue.fields.appName.stringValue;
+            return {
+              appName: friendlyNames[pkg] || (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
+              usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
+              packageName: pkg,
+            };
+          })
+          .filter(a => a.usageMinutes > 0 && !hiddenPackages.includes(a.packageName));
         const tsStr = j.fields.liveUsageUpdated?.timestampValue;
         const updated = tsStr ? new Date(tsStr) : null;
         return { apps, updated };
