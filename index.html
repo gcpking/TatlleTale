@@ -119,6 +119,8 @@
 
   const auth = firebase.auth();
   const db   = firebase.firestore();
+  db.settings({ ignoreUndefinedProperties: true });
+  db.enableNetwork();
 
   let familyId = null, children = [], childIdx = 0, unsub = null;
 
@@ -289,7 +291,7 @@
       if (!snap.exists) return { error: 'Family document not found: ' + fid };
       const d = snap.data();
       const keys = Object.keys(d || {}).join(', ');
-      if (!d.liveUsage) return { error: `Fields in doc: [${keys}]` };
+      if (!d.liveUsage) return { error: `Reading family: ${fid} — fields: [${keys}]` };
       const apps = d.liveUsage
         .map(a => {
           const pkg = a.packageName || '';
