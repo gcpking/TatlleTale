@@ -285,7 +285,7 @@
   async function fetchLiveUsage() {
     const fid = familyId || 'LCKKBO';
     try {
-      const snap = await db.collection('families').doc(fid).get();
+      const snap = await db.collection('families').doc(fid).get({ source: 'server' });
       if (!snap.exists) return { error: 'Family document not found: ' + fid };
       const d = snap.data();
       if (!d.liveUsage) return { error: 'No liveUsage field in family document' };
