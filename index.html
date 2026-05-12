@@ -288,7 +288,8 @@
       const snap = await db.collection('families').doc(fid).get({ source: 'server' });
       if (!snap.exists) return { error: 'Family document not found: ' + fid };
       const d = snap.data();
-      if (!d.liveUsage) return { error: 'No liveUsage field in family document' };
+      const keys = Object.keys(d || {}).join(', ');
+      if (!d.liveUsage) return { error: `Fields in doc: [${keys}]` };
       const apps = d.liveUsage
         .map(a => {
           const pkg = a.packageName || '';
