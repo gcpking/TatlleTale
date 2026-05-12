@@ -284,26 +284,24 @@
 
   async function fetchLiveUsage() {
     try {
-      const r = await fetch(`https://firestore.googleapis.com/v1/projects/tatletale-16660/databases/(default)/documents/families/LCKKBO`);
-      const j = await r.json();
-      if (j.fields && j.fields.liveUsage) {
-        const apps = j.fields.liveUsage.arrayValue.values
-          .map(v => {
-            const pkg = v.mapValue.fields.packageName?.stringValue || '';
-            const rawName = v.mapValue.fields.appName.stringValue;
-            return {
-              appName: friendlyNames[pkg] || (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
-              usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
-              packageName: pkg,
-            };
-          })
-          .filter(a => a.usageMinutes > 0 && !hiddenPackages.includes(a.packageName));
-        const tsStr = j.fields.liveUsageUpdated?.timestampValue;
-        const updated = tsStr ? new Date(tsStr) : null;
-        return { apps, updated };
-      }
-    } catch(e) {}
-    return null;
+      const snap = await db.collection('families').doc(familyId).get();
+      if (!snap.exists || !snap.data().liveUsage) return null;
+      const raw = snap.data().liveUsage;
+      const apps = raw
+        .map(a => {
+          const pkg = a.packageName || '';
+          const rawName = a.appName || '';
+          return {
+            appName: friendlyNames[pkg] || (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
+            usageMinutes: parseInt(a.usageMinutes || 0),
+            packageName: pkg,
+          };
+        })
+        .filter(a => a.usageMinutes > 0 && !hiddenPackages.includes(a.packageName));
+      const ts = snap.data().liveUsageUpdated;
+      const updated = ts ? ts.toDate() : null;
+      return { apps, updated };
+    } catch(e) { console.error('fetchLiveUsage error:', e); return null; }
   }
 
   async function renderChild(i) {
@@ -477,16 +475,7 @@
       .set({ requestedAt: firebase.firestore.FieldValue.serverTimestamp() });
     // Wait 3 seconds then re-read directly from Firestore
     setTimeout(async () => {
-      let data = null;
-      const r = await fetch(`https://firestore.googleapis.com/v1/projects/tatletale-16660/databases/(default)/documents/families/${familyId}`);
-      const j = await r.json();
-      if (j.fields && j.fields.liveUsage) {
-        const apps = j.fields.liveUsage.arrayValue.values.map(v => ({
-          appName: v.mapValue.fields.appName.stringValue,
-          usageMinutes: parseInt(v.mapValue.fields.usageMinutes.integerValue || 0),
-        }));
-        data = { apps };
-      }
+      const data = await fetchLiveUsage();
       if (el) el.innerHTML = buildUsageHtml(data);
     }, 3000);
   };
