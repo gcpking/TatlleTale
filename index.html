@@ -283,11 +283,13 @@
   ];
 
   async function fetchLiveUsage() {
+    const fid = familyId || 'LCKKBO';
     try {
-      const snap = await db.collection('families').doc(familyId).get();
-      if (!snap.exists || !snap.data().liveUsage) return null;
-      const raw = snap.data().liveUsage;
-      const apps = raw
+      const snap = await db.collection('families').doc(fid).get();
+      if (!snap.exists) return { error: 'Family document not found: ' + fid };
+      const d = snap.data();
+      if (!d.liveUsage) return { error: 'No liveUsage field in family document' };
+      const apps = d.liveUsage
         .map(a => {
           const pkg = a.packageName || '';
           const rawName = a.appName || '';
@@ -298,10 +300,9 @@
           };
         })
         .filter(a => a.usageMinutes > 0 && !hiddenPackages.includes(a.packageName));
-      const ts = snap.data().liveUsageUpdated;
-      const updated = ts ? ts.toDate() : null;
+      const updated = d.liveUsageUpdated ? d.liveUsageUpdated.toDate() : null;
       return { apps, updated };
-    } catch(e) { console.error('fetchLiveUsage error:', e); return null; }
+    } catch(e) { return { error: e.message }; }
   }
 
   async function renderChild(i) {
@@ -333,6 +334,7 @@
 
   function buildUsageHtml(data) {
     if (!data) return '<p class="empty">Waiting for data — Tattletale must be open on the device.</p>';
+    if (data.error) return `<p style="color:red;font-size:13px;">Error: ${data.error}</p>`;
     const apps = data.apps || [];
     const updated = data.updated;
     if (!apps.length) return '<p class="empty">No usage data yet.</p>';
