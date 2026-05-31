@@ -122,7 +122,9 @@
   db.settings({ ignoreUndefinedProperties: true });
   db.enableNetwork();
 
-  let familyId = null, children = [], childIdx = 0, unsub = null;
+  let familyId = null, children = [], childIdx = 0;
+  let unsub = null, liveUnsub = null, logUnsub = null;
+  let childState = { pending: [], log: [], usageData: null };
 
   function show(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -284,75 +286,98 @@
     'com.google.android.gsf','com.google.android.inputmethod.latin',
   ];
 
-  async function fetchLiveUsage() {
-    const fid = familyId || 'LCKKBO';
+  function parseLiveUsageFromDoc(d) {
+    if (!d || !d.liveUsage) return null;
+    const apps = (d.liveUsage || [])
+      .map(a => {
+        const pkg = a.packageName || '';
+        const rawName = a.appName || '';
+        return {
+          appName: friendlyNames[pkg] || (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
+          usageMinutes: parseInt(a.usageMinutes || 0),
+          packageName: pkg,
+        };
+      })
+      .filter(a => a.usageMinutes > 0 && !hiddenPackages.includes(a.packageName));
+    const updated = d.liveUsageUpdated ? d.liveUsageUpdated.toDate() : null;
+    return { apps, updated };
+  }
+
+  function formatEntryTime(ts) {
+    if (!ts) return '';
     try {
-      const snap = await db.collection('families').doc(fid).get({ source: 'server' });
-      if (!snap.exists) return { error: 'Family document not found: ' + fid };
-      const d = snap.data();
-      const keys = Object.keys(d || {}).join(', ');
-      if (!d.liveUsage) return { error: `Reading family: ${fid} — fields: [${keys}]` };
-      const apps = d.liveUsage
-        .map(a => {
-          const pkg = a.packageName || '';
-          const rawName = a.appName || '';
-          return {
-            appName: friendlyNames[pkg] || (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
-            usageMinutes: parseInt(a.usageMinutes || 0),
-            packageName: pkg,
-          };
-        })
-        .filter(a => a.usageMinutes > 0 && !hiddenPackages.includes(a.packageName));
-      const updated = d.liveUsageUpdated ? d.liveUsageUpdated.toDate() : null;
-      return { apps, updated };
-    } catch(e) { return { error: e.message }; }
+      const d = ts.toDate ? ts.toDate() : new Date((ts.seconds || 0) * 1000);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch(e) { return ''; }
   }
 
   async function renderChild(i) {
-    if (unsub) unsub();
+    // Clean up all previous listeners
+    if (unsub)     { unsub();     unsub = null; }
+    if (liveUnsub) { liveUnsub(); liveUnsub = null; }
+    if (logUnsub)  { logUnsub();  logUnsub = null; }
+
     document.getElementById('main').innerHTML = '<div class="spinner">Loading...</div>';
     const child = children[i];
+    childState = { pending: [], log: [], usageData: null };
 
-    // Load everything in parallel
-    const [log, liveResult] = await Promise.all([
-      loadLog(child.id),
-      fetchLiveUsage()
-    ]);
-    const usageData = liveResult ? liveResult : null;
+    // Real-time live usage: updates the instant the device pushes data
+    liveUnsub = db.collection('families').doc(familyId)
+      .onSnapshot(snap => {
+        childState.usageData = parseLiveUsageFromDoc(snap.data() || {});
+        renderDashboard(child, childState.pending, childState.log, childState.usageData);
+      }, err => console.error('liveUsage listener error:', err));
 
-    // Render immediately with what we have
-    const pending = [];
-    renderDashboard(child, pending, log, usageData);
+    // Real-time log listener for today
+    const today = new Date().toISOString().slice(0,10);
+    logUnsub = db.collection('families').doc(familyId)
+      .collection('children').doc(child.id).collection('logs').doc(today)
+      .onSnapshot(snap => {
+        childState.log = snap.exists
+          ? (snap.data().entries || []).sort((a,b) => (a.timestamp?.seconds||0) - (b.timestamp?.seconds||0))
+          : [];
+        renderDashboard(child, childState.pending, childState.log, childState.usageData);
+      }, err => console.error('log listener error:', err));
 
-    // Then set up live pending requests listener
+    // Real-time pending requests listener
     unsub = db.collection('families').doc(familyId).collection('pendingRequests')
       .where('outcome','==','pending')
-      .onSnapshot(async snap => {
-        const allPending = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.childId === child.id);
-        const freshLog = await loadLog(child.id);
-        const freshResult = await fetchLiveUsage();
-        renderDashboard(child, allPending, freshLog, freshResult);
-      });
+      .onSnapshot(snap => {
+        childState.pending = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(r => r.childId === child.id);
+        renderDashboard(child, childState.pending, childState.log, childState.usageData);
+      }, err => console.error('pending listener error:', err));
   }
 
   function buildUsageHtml(data) {
-    if (!data) return '<p class="empty">Waiting for data — Tattletale must be open on the device.</p>';
-    if (data.error) return `<p style="color:red;font-size:13px;">Error: ${data.error}</p>`;
+    if (!data) return `<div style="padding:16px;background:#F0F0FF;border-radius:10px;color:#666;font-size:14px;">
+      <strong>No data yet.</strong> Tap <strong>↻ Refresh</strong> to request an update from the device.
+      The dashboard will update automatically the moment the device responds — even if you don't touch Refresh again.
+    </div>`;
     const apps = data.apps || [];
     const updated = data.updated;
-    if (!apps.length) return '<p class="empty">No usage data yet.</p>';
+    if (!apps.length) return '<p class="empty">No app usage recorded today.</p>';
 
     const totalMins = apps.reduce((sum, a) => sum + (a.usageMinutes || 0), 0);
     const totalHrs = Math.floor(totalMins / 60);
     const totalRem = totalMins % 60;
     const totalStr = totalHrs > 0 ? `${totalHrs}h ${totalRem}m` : `${totalMins}m`;
 
-    const timeStr = updated ? updated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
-    const dateStr = updated ? updated.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : null;
+    // Staleness indicator — green <5 min, amber <30 min, red older
+    let staleHtml = '';
+    if (updated) {
+      const staleMins = Math.floor((Date.now() - updated.getTime()) / 60000);
+      const color = staleMins < 5 ? '#22C55E' : staleMins < 30 ? '#F59E0B' : '#EF4444';
+      const staleText = staleMins < 1 ? 'Just now' : staleMins < 60 ? `${staleMins}m ago` : `${Math.floor(staleMins/60)}h ${staleMins%60}m ago`;
+      const dateStr = updated.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+      staleHtml = `<span style="font-size:12px;color:${color};font-weight:600;">● ${staleText}</span>
+        <span style="font-size:11px;color:#aaa;margin-left:6px;">${dateStr} ${updated.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>`;
+    }
 
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
       <div style="font-size:13px;color:#555;">Total: <strong>${totalStr}</strong></div>
-      ${timeStr ? `<div style="font-size:12px;color:#aaa;">Last updated ${dateStr} at ${timeStr}</div>` : ''}
+      <div>${staleHtml}</div>
     </div>`;
 
     apps.slice(0, 15).forEach(a => {
@@ -372,14 +397,6 @@
       </div>`;
     });
     return html;
-  }
-
-  async function loadLog(childId) {
-    const today = new Date().toISOString().slice(0,10);
-    const snap = await db.collection('families').doc(familyId)
-      .collection('children').doc(childId).collection('logs').doc(today).get();
-    if (!snap.exists) return [];
-    return (snap.data().entries||[]).sort((a,b)=>(a.timestamp?.seconds||0)-(b.timestamp?.seconds||0));
   }
 
   async function renderDashboard(child, pending, log, usageData) {
@@ -430,12 +447,16 @@
     }
 
     html += `<div class="section-title">Today's log
-      <button onclick="createSummary('${child.id}')" style="float:right;background:var(--purple);color:white;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">📋 Create summary</button>
+      <button onclick="createSummary('${child.id}')" style="float:right;background:var(--purple);color:white;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">📋 Summary</button>
     </div>`;
     html += '<div id="summary-section"></div>';
     if (!log.length) html += '<p class="empty">Nothing logged yet today.</p>';
     else [...log].reverse().forEach(e => {
-      html += `<div class="log-entry ${e.outcome||''}">${e.text}</div>`;
+      const timeStr = formatEntryTime(e.timestamp);
+      html += `<div class="log-entry ${e.outcome||''}">
+        ${timeStr ? `<span style="float:right;color:#aaa;font-size:11px;font-weight:600;margin-left:8px;">${timeStr}</span>` : ''}
+        ${e.text}
+      </div>`;
     });
 
     document.getElementById('main').innerHTML = html;
@@ -473,16 +494,12 @@
 
   window.requestRefresh = async function(childId) {
     const el = document.getElementById('live-usage-section');
-    if (el) el.innerHTML = '<p style="color:#888;font-size:13px;">Refreshing...</p>';
-    // Write refresh request so phone pushes immediately
+    if (el) el.innerHTML = '<p style="color:#888;font-size:13px;padding:12px;">Refresh requested — dashboard will update automatically when device responds...</p>';
+    // Write refresh request; device picks it up whenever it connects and pushes fresh data.
+    // The onSnapshot listener on the family doc will update this panel automatically.
     await db.collection('families').doc(familyId)
       .collection('children').doc(childId).collection('data').doc('refreshRequest')
       .set({ requestedAt: firebase.firestore.FieldValue.serverTimestamp() });
-    // Wait 3 seconds then re-read directly from Firestore
-    setTimeout(async () => {
-      const data = await fetchLiveUsage();
-      if (el) el.innerHTML = buildUsageHtml(data);
-    }, 3000);
   };
 
   window.createSummary = async function(childId) {
@@ -513,7 +530,10 @@
 
     entries.forEach(e => {
       const dot = e.outcome==='approved'?'🟢':e.outcome==='denied'?'🔴':'🟡';
-      summary += `<div style="margin-bottom:8px;font-size:14px;">${dot} ${e.text}</div>`;
+      const timeStr = formatEntryTime(e.timestamp);
+      summary += `<div style="margin-bottom:8px;font-size:14px;">
+        ${dot}${timeStr ? ` <span style="color:#aaa;font-size:11px;">[${timeStr}]</span>` : ''} ${e.text}
+      </div>`;
     });
 
     summary += '</div></div>';
