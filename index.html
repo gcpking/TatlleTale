@@ -494,12 +494,12 @@
 
   window.requestRefresh = async function(childId) {
     const el = document.getElementById('live-usage-section');
-    if (el) el.innerHTML = '<p style="color:#888;font-size:13px;padding:12px;">Refresh requested — dashboard will update automatically when device responds...</p>';
-    // Write refresh request; device picks it up whenever it connects and pushes fresh data.
-    // The onSnapshot listener on the family doc will update this panel automatically.
-    await db.collection('families').doc(familyId)
-      .collection('children').doc(childId).collection('data').doc('refreshRequest')
-      .set({ requestedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    if (el) el.innerHTML = '<p style="color:#888;font-size:13px;padding:12px;">Refresh requested — dashboard updates automatically when device responds...</p>';
+    // Write refreshRequestedAt to the family doc; the mobile app polls this every 30 s
+    // and syncs immediately when it sees a newer timestamp.
+    await db.collection('families').doc(familyId).update({
+      refreshRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
   };
 
   window.createSummary = async function(childId) {

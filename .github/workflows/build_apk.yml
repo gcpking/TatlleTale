@@ -1,0 +1,59 @@
+name: Build Tattletale Sync APK
+
+on:
+  push:
+    branches:
+      - claude/tattletale-index-sync-vZ2Fq
+      - main
+    paths:
+      - 'tattletale_sync/**'
+      - '.github/workflows/build_apk.yml'
+  workflow_dispatch:   # lets you trigger a build manually from the GitHub website
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+
+      - name: Scaffold fresh Flutter project
+        run: flutter create --org com.tattletale --project-name tattletale_sync _build
+
+      - name: Copy Tattletale source files
+        run: |
+          cp tattletale_sync/pubspec.yaml _build/pubspec.yaml
+          cp tattletale_sync/lib/main.dart              _build/lib/main.dart
+          cp tattletale_sync/lib/firebase_rest.dart     _build/lib/firebase_rest.dart
+          cp tattletale_sync/lib/background_service.dart _build/lib/background_service.dart
+
+      - name: Patch AndroidManifest.xml
+        run: python3 tattletale_sync/patch_manifest.py _build/android/app/src/main/AndroidManifest.xml
+
+      - name: Get dependencies
+        working-directory: _build
+        run: flutter pub get
+
+      - name: Build debug APK
+        working-directory: _build
+        run: flutter build apk --debug --no-tree-shake-icons
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tattletale-sync-apk
+          path: _build/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 30
