@@ -285,7 +285,7 @@
   ];
 
   async function fetchLiveUsage() {
-    const fid = familyId || 'LCKKBO';
+    const fid = familyId;
     try {
       const snap = await db.collection('families').doc(fid).get({ source: 'server' });
       if (!snap.exists) return { error: 'Family document not found: ' + fid };
