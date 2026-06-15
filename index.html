@@ -300,6 +300,8 @@
             appName: friendlyNames[pkg] || (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
             usageMinutes: parseInt(a.usageMinutes || 0),
             packageName: pkg,
+            dataKb: a.dataKb || 0,
+            sessions: a.sessions || [],
           };
         })
         .filter(a => a.usageMinutes > 0 && !hiddenPackages.includes(a.packageName));
