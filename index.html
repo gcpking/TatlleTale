@@ -626,8 +626,22 @@
     ruleChildId = childId;
     const sel = document.getElementById('modal-rule-app');
     sel.innerHTML = '';
-    const knownApps = (window._installedApps || []).map(a => a.appName).sort();
-    knownApps.forEach(name => {
+    // Most used today first, then remaining installed apps
+    const todayApps = (currentUsageData && currentUsageData.apps || []).map(a => a.appName);
+    const installedApps = (window._installedApps || []).map(a => a.appName).filter(n => !todayApps.includes(n)).sort();
+    const allApps = [...todayApps, ...installedApps];
+    if (todayApps.length && installedApps.length) {
+      // Add separator
+      const sep = document.createElement('option');
+      sep.disabled = true; sep.textContent = '── All installed apps ──';
+      allApps.splice(todayApps.length, 0, null); // marker for separator
+    }
+    allApps.forEach(name => {
+      if (name === null) {
+        const sep = document.createElement('option');
+        sep.disabled = true; sep.textContent = '── All installed apps ──';
+        sel.appendChild(sep); return;
+      }
       const opt = document.createElement('option');
       opt.value = name; opt.textContent = name; sel.appendChild(opt);
     });
