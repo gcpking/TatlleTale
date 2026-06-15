@@ -334,10 +334,18 @@
     'com.google.android.contacts': 'Contacts',
     'com.google.android.apps.photos': 'Photos',
     'com.google.android.deskclock': 'Clock',
-    'com.whatsapp': 'WhatsApp',
     'com.motorola.camera3': 'Camera',
     'com.google.android.dialer': 'Phone',
     'com.android.settings': 'Settings',
+    'com.chess': 'Chess',
+    'com.TatleTale': 'Tattletale',
+    'com.tatletale': 'Tattletale',
+    'com.wikipedia': 'Wikipedia',
+    'org.wikipedia': 'Wikipedia',
+    'com.amazon.mShop.android.shopping': 'Amazon',
+    'com.google.android.apps.youtube.music': 'YouTube Music',
+    'com.samsung.android.messaging': 'Messages',
+    'com.google.android.apps.messaging': 'Messages',
   };
 
   const hiddenPackages = [
@@ -345,6 +353,7 @@
     'com.motorola.launcher3','com.android.launcher3','com.google.android.apps.nexuslauncher',
     'com.glance.lockscreenM','com.motorola.ccc.ota','com.android.vending',
     'com.google.android.gsf','com.google.android.inputmethod.latin',
+    'com.TatleTale','com.tatletale',
   ];
 
   async function fetchLiveUsage() {
@@ -403,6 +412,23 @@
       });
   }
 
+  function mergeSessions(sessions) {
+    if (!sessions.length) return sessions;
+    const sorted = [...sessions].sort((a, b) => a.startMs - b.startMs);
+    const merged = [{ ...sorted[0] }];
+    for (let i = 1; i < sorted.length; i++) {
+      const last = merged[merged.length - 1];
+      const curr = sorted[i];
+      if (curr.startMs - (last.endMs || curr.startMs) <= 120000) { // merge if gap < 2 min
+        last.endMs = Math.max(last.endMs || 0, curr.endMs || 0);
+        if (curr.active) last.active = true;
+      } else {
+        merged.push({ ...curr });
+      }
+    }
+    return merged.filter(s => (s.endMs || Date.now()) - s.startMs >= 60000); // drop < 1 min
+  }
+
   function buildUsageHtml(data) {
     currentUsageData = data;
     if (!data) return '<p class="empty">Waiting for data — Tattletale must be open on the device.</p>';
@@ -449,7 +475,7 @@
       const fromMs = timeToMs(filterFrom);
       const toMs = timeToMs(filterTo);
 
-      let visibleSessions = (a.sessions || []).filter(s => {
+      let visibleSessions = mergeSessions(a.sessions || []).filter(s => {
         if (fromMs && (s.endMs || Date.now()) < fromMs) return false;
         if (toMs && s.startMs > toMs) return false;
         return true;
@@ -467,7 +493,7 @@
           const dur = durMins >= 60 ? `${Math.floor(durMins/60)}h ${durMins%60}m` : `${durMins}m`;
           return `${fmt(s.startMs)} – ${end} <span style="color:#bbb;">(${dur})</span>`;
         }).join(' &nbsp;·&nbsp; ');
-        sessionsHtml = `<div style="font-size:13px;color:#888;margin-top:5px;">${parts}</div>`;
+        sessionsHtml = `<div style="font-size:15px;color:#666;margin-top:6px;line-height:1.6;">${parts}</div>`;
       }
 
       appRows.push(`<div style="background:white;border-radius:10px;padding:12px 16px;margin-bottom:6px;">
