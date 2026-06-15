@@ -282,7 +282,15 @@
   function doLogout() { stopAutoRefresh(); auth.signOut(); }
 
   // ── Children ────────────────────────────────────────────────────────────────
+  async function loadInstalledApps() {
+    try {
+      const snap = await db.collection('families').doc(familyId).get();
+      window._installedApps = snap.data()?.installedApps || [];
+    } catch (_) { window._installedApps = []; }
+  }
+
   async function loadChildren() {
+    await loadInstalledApps();
     const snap = await db.collection('families').doc(familyId).collection('children').get();
     children = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderTabs();
@@ -618,13 +626,8 @@
     ruleChildId = childId;
     const sel = document.getElementById('modal-rule-app');
     sel.innerHTML = '';
-    // Populate from current live usage apps
-    const knownApps = currentUsageData && currentUsageData.apps
-      ? currentUsageData.apps.map(a => a.appName)
-      : [];
-    // Add all friendly names too
-    const allNames = [...new Set([...knownApps, ...Object.values(friendlyNames)])].sort();
-    allNames.forEach(name => {
+    const knownApps = (window._installedApps || []).map(a => a.appName).sort();
+    knownApps.forEach(name => {
       const opt = document.createElement('option');
       opt.value = name; opt.textContent = name; sel.appendChild(opt);
     });
