@@ -107,6 +107,27 @@
   <main id="main"><div class="spinner">Loading...</div></main>
 </div>
 
+<div id="rule-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:white;border-radius:20px;padding:28px;width:100%;max-width:360px;">
+    <h2 style="font-size:18px;font-weight:700;color:var(--purple);margin-bottom:20px;">Add app rule</h2>
+    <select id="modal-rule-app" onchange="onAppSelect(this)"
+      style="width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:12px;background:white;box-sizing:border-box;">
+    </select>
+    <input id="modal-rule-name" placeholder="Type app name..."
+      style="display:none;width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:12px;box-sizing:border-box;">
+    <select id="modal-rule-cat"
+      style="width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:20px;background:white;box-sizing:border-box;">
+      <option value="blocked">🔴 Blocked — always denied</option>
+      <option value="flagged">🟡 Flagged — needs review</option>
+      <option value="approved">🟢 Approved — always allowed</option>
+    </select>
+    <div style="display:flex;gap:10px;">
+      <button onclick="saveModalRule()" class="btn" style="flex:1;margin:0;padding:12px;">Add rule</button>
+      <button onclick="closeRuleModal()" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:10px;background:white;cursor:pointer;font-size:15px;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
   firebase.initializeApp({
     apiKey: 'AIzaSyDn_iWwCgTIXq1gDzhC3BHR8I5scfF-MFA',
@@ -123,6 +144,48 @@
   db.enableNetwork();
 
   let familyId = null, children = [], childIdx = 0, unsub = null;
+  let filterFrom = '', filterTo = '', currentUsageData = null;
+
+  function timeToMs(timeStr) {
+    if (!timeStr) return null;
+    const [h, m] = timeStr.split(':').map(Number);
+    const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime();
+  }
+
+  function applyTimeFilter() {
+    const el = document.getElementById('live-usage-section');
+    if (el && currentUsageData) el.innerHTML = buildUsageHtml(currentUsageData);
+  }
+  let autoRefreshTimer = null, activeChildId = null;
+
+  function startAutoRefresh(childId) {
+    stopAutoRefresh();
+    activeChildId = childId;
+    autoRefreshTimer = setInterval(() => {
+      if (!document.hidden) silentRefresh(childId);
+    }, 45000);
+  }
+
+  function stopAutoRefresh() {
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  }
+
+  async function silentRefresh(childId) {
+    try {
+      await db.collection('families').doc(familyId)
+        .collection('children').doc(childId).collection('data').doc('refreshRequest')
+        .set({ requestedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      setTimeout(async () => {
+        const data = await fetchLiveUsage();
+        const el = document.getElementById('live-usage-section');
+        if (el) el.innerHTML = buildUsageHtml(data);
+      }, 3000);
+    } catch (_) {}
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && activeChildId) silentRefresh(activeChildId);
+  });
 
   function show(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -198,7 +261,7 @@
     auth.createUserWithEmailAndPassword(email, pass)
       .then(async cred => {
         await db.collection('families').doc(code).set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
-        await db.collection('parents').doc(cred.user.uid).set({ name, title, familyId: code });
+        await db.collection('parents').doc(cred.user.uid).set({ name, title, familyId: code, email });
       })
       .catch(e => setMsg('auth-msg', e.message, 'error'));
   }
@@ -216,10 +279,18 @@
       .catch(e => setMsg('setup-msg', e.message, 'error'));
   }
 
-  function doLogout() { auth.signOut(); }
+  function doLogout() { stopAutoRefresh(); auth.signOut(); }
 
   // ── Children ────────────────────────────────────────────────────────────────
+  async function loadInstalledApps() {
+    try {
+      const snap = await db.collection('families').doc(familyId).get();
+      window._installedApps = snap.data()?.installedApps || [];
+    } catch (_) { window._installedApps = []; }
+  }
+
   async function loadChildren() {
+    await loadInstalledApps();
     const snap = await db.collection('families').doc(familyId).collection('children').get();
     children = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderTabs();
@@ -271,10 +342,18 @@
     'com.google.android.contacts': 'Contacts',
     'com.google.android.apps.photos': 'Photos',
     'com.google.android.deskclock': 'Clock',
-    'com.whatsapp': 'WhatsApp',
     'com.motorola.camera3': 'Camera',
     'com.google.android.dialer': 'Phone',
     'com.android.settings': 'Settings',
+    'com.chess': 'Chess',
+    'com.TatleTale': 'Tattletale',
+    'com.tatletale': 'Tattletale',
+    'com.wikipedia': 'Wikipedia',
+    'org.wikipedia': 'Wikipedia',
+    'com.amazon.mShop.android.shopping': 'Amazon',
+    'com.google.android.apps.youtube.music': 'YouTube Music',
+    'com.samsung.android.messaging': 'Messages',
+    'com.google.android.apps.messaging': 'Messages',
   };
 
   const hiddenPackages = [
@@ -282,6 +361,7 @@
     'com.motorola.launcher3','com.android.launcher3','com.google.android.apps.nexuslauncher',
     'com.glance.lockscreenM','com.motorola.ccc.ota','com.android.vending',
     'com.google.android.gsf','com.google.android.inputmethod.latin',
+    'com.TatleTale','com.tatletale',
   ];
 
   async function fetchLiveUsage() {
@@ -300,18 +380,23 @@
             appName: friendlyNames[pkg] || (rawName.charAt(0).toUpperCase() + rawName.slice(1)),
             usageMinutes: parseInt(a.usageMinutes || 0),
             packageName: pkg,
+            dataKb: a.dataKb || 0,
+            sessions: a.sessions || [],
           };
         })
         .filter(a => a.usageMinutes > 0 && !hiddenPackages.includes(a.packageName));
-      const updated = d.liveUsageUpdated ? d.liveUsageUpdated.toDate() : null;
+      const updated = d.liveUsageUpdated ? d.liveUsageUpdated.toDate()
+                    : d.liveUsageUpdatedMs ? new Date(d.liveUsageUpdatedMs) : null;
       return { apps, updated };
     } catch(e) { return { error: e.message }; }
   }
 
   async function renderChild(i) {
     if (unsub) unsub();
+    stopAutoRefresh();
     document.getElementById('main').innerHTML = '<div class="spinner">Loading...</div>';
     const child = children[i];
+    startAutoRefresh(child.id);
 
     // Load everything in parallel
     const [log, liveResult] = await Promise.all([
@@ -335,7 +420,48 @@
       });
   }
 
+  function toggleSessions(id) {
+    const el = document.getElementById(id);
+    const arrow = document.getElementById(id + '_arrow');
+    if (!el) return;
+    const open = el.style.display !== 'none';
+    el.style.display = open ? 'none' : 'block';
+    if (arrow) arrow.textContent = open ? '▼' : '▲';
+  }
+
+  function timeDropdown(id, selected, onchange, placeholder) {
+    const opts = [`<option value="">${placeholder}</option>`];
+    for (let h = 0; h < 24; h++) {
+      for (let m of [0, 30]) {
+        const hh = String(h).padStart(2,'0');
+        const mm = String(m).padStart(2,'0');
+        const val = `${hh}:${mm}`;
+        const label = new Date(`2000-01-01T${val}`).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+        opts.push(`<option value="${val}"${selected===val?' selected':''}>${label}</option>`);
+      }
+    }
+    return `<select id="${id}" onchange="${onchange}" style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;color:#333;background:white;">${opts.join('')}</select>`;
+  }
+
+  function mergeSessions(sessions) {
+    if (!sessions.length) return sessions;
+    const sorted = [...sessions].sort((a, b) => a.startMs - b.startMs);
+    const merged = [{ ...sorted[0] }];
+    for (let i = 1; i < sorted.length; i++) {
+      const last = merged[merged.length - 1];
+      const curr = sorted[i];
+      if (curr.startMs - (last.endMs || curr.startMs) <= 120000) { // merge if gap < 2 min
+        last.endMs = Math.max(last.endMs || 0, curr.endMs || 0);
+        if (curr.active) last.active = true;
+      } else {
+        merged.push({ ...curr });
+      }
+    }
+    return merged.filter(s => (s.endMs || Date.now()) - s.startMs >= 60000); // drop < 1 min
+  }
+
   function buildUsageHtml(data) {
+    currentUsageData = data;
     if (!data) return '<p class="empty">Waiting for data — Tattletale must be open on the device.</p>';
     if (data.error) return `<p style="color:red;font-size:13px;">Error: ${data.error}</p>`;
     const apps = data.apps || [];
@@ -350,27 +476,74 @@
     const timeStr = updated ? updated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
     const dateStr = updated ? updated.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : null;
 
-    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
       <div style="font-size:13px;color:#555;">Total: <strong>${totalStr}</strong></div>
       ${timeStr ? `<div style="font-size:12px;color:#aaa;">Last updated ${dateStr} at ${timeStr}</div>` : ''}
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;background:white;padding:10px 14px;border-radius:10px;flex-wrap:wrap;">
+      <span style="font-size:13px;color:#888;">🔍 Sessions</span>
+      ${timeDropdown('filter-from-sel', filterFrom, 'filterFrom=this.value;applyTimeFilter()', 'From')}
+      <span style="font-size:13px;color:#aaa;">→</span>
+      ${timeDropdown('filter-to-sel', filterTo, 'filterTo=this.value;applyTimeFilter()', 'To')}
+      ${filterFrom||filterTo ? `<button onclick="filterFrom='';filterTo='';document.getElementById('filter-from-sel').value='';document.getElementById('filter-to-sel').value='';applyTimeFilter()" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:16px;padding:0 4px;">✕</button>` : ''}
     </div>`;
 
+    function fmt(ms) {
+      return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    const appRows = [];
     apps.slice(0, 15).forEach(a => {
       const mins = a.usageMinutes || 0;
-      const bar = Math.min(100, Math.round((mins / totalMins) * 100));
       const h = Math.floor(mins / 60);
       const m = mins % 60;
       const label = h > 0 ? `${h}h ${m}m` : `${mins}m`;
-      html += `<div style="background:white;border-radius:10px;padding:12px 16px;margin-bottom:6px;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+      const kb = a.dataKb || 0;
+      const dataLabel = kb > 1024 ? `${(kb/1024).toFixed(1)} MB` : kb > 0 ? `${kb} KB` : '';
+
+      const fromMs = timeToMs(filterFrom);
+      const toMs = timeToMs(filterTo);
+
+      let visibleSessions = mergeSessions(a.sessions || []).filter(s => {
+        if (fromMs && (s.endMs || Date.now()) < fromMs) return false;
+        if (toMs && s.startMs > toMs) return false;
+        return true;
+      });
+
+      // If filtering is active and this app has no matching sessions, skip it
+      if ((filterFrom || filterTo) && a.sessions && a.sessions.length && !visibleSessions.length) return null;
+
+      let sessionsHtml = '';
+      if (visibleSessions.length) {
+        const parts = visibleSessions.map(s => {
+          const end = s.active ? '<span style="color:#EF4444;font-weight:600;">now</span>' : fmt(s.endMs);
+          const durMs = (s.endMs || Date.now()) - s.startMs;
+          const durMins = Math.round(durMs / 60000);
+          const dur = durMins >= 60 ? `${Math.floor(durMins/60)}h ${durMins%60}m` : `${durMins}m`;
+          return `${fmt(s.startMs)} – ${end} (${dur})`;
+        }).join(' &nbsp;·&nbsp; ');
+        sessionsHtml = `<div style="font-size:16px;color:#555;line-height:2.2;">${parts.replace(/ &nbsp;·&nbsp; /g, '<br>')}</div>`;
+      }
+
+      const rowId = 'sess_' + a.appName.replace(/\W/g,'');
+      const hasDetail = visibleSessions.length > 0;
+      appRows.push(`<div style="background:white;border-radius:10px;margin-bottom:6px;overflow:hidden;">
+        <div onclick="${hasDetail ? `toggleSessions('${rowId}')` : ''}"
+          style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;${hasDetail?'cursor:pointer;':''}"
+        >
           <span style="font-weight:600;font-size:14px;">${a.appName}</span>
-          <span style="color:#888;font-size:13px;">${label}</span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="text-align:right;">
+              <span style="color:#888;font-size:13px;">${label}</span>
+              ${dataLabel ? `<span style="color:#aaa;font-size:11px;margin-left:8px;">${dataLabel}</span>` : ''}
+            </div>
+            ${hasDetail ? `<span id="${rowId}_arrow" style="color:#ccc;font-size:12px;">▼</span>` : ''}
+          </div>
         </div>
-        <div style="background:#eee;border-radius:4px;height:4px;">
-          <div style="background:var(--purple);width:${bar}%;height:4px;border-radius:4px;"></div>
-        </div>
-      </div>`;
+        ${hasDetail ? `<div id="${rowId}" style="display:none;padding:0 16px 12px;border-top:1px solid #f0f0f0;">${sessionsHtml}</div>` : ''}
+      </div>`);
     });
+    html += appRows.filter(Boolean).join('');
     return html;
   }
 
@@ -447,12 +620,58 @@
     return snap.data().apps || [];
   }
 
+  let ruleChildId = null;
+
   window.showAddRule = function(childId) {
-    const name = prompt('App name (e.g. Brawl Stars):');
+    ruleChildId = childId;
+    const sel = document.getElementById('modal-rule-app');
+    sel.innerHTML = '';
+    // Most used today first, then remaining installed apps
+    const todayApps = (currentUsageData && currentUsageData.apps || []).map(a => a.appName);
+    const installedApps = (window._installedApps || []).map(a => a.appName).filter(n => !todayApps.includes(n)).sort();
+    const allApps = [...todayApps, ...installedApps];
+    if (todayApps.length && installedApps.length) {
+      // Add separator
+      const sep = document.createElement('option');
+      sep.disabled = true; sep.textContent = '── All installed apps ──';
+      allApps.splice(todayApps.length, 0, null); // marker for separator
+    }
+    allApps.forEach(name => {
+      if (name === null) {
+        const sep = document.createElement('option');
+        sep.disabled = true; sep.textContent = '── All installed apps ──';
+        sel.appendChild(sep); return;
+      }
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name; sel.appendChild(opt);
+    });
+    const other = document.createElement('option');
+    other.value = '__other__'; other.textContent = '✏️ Type a name...';
+    sel.appendChild(other);
+    document.getElementById('modal-rule-name').style.display = 'none';
+    document.getElementById('modal-rule-name').value = '';
+    document.getElementById('modal-rule-cat').value = 'blocked';
+    document.getElementById('rule-modal').style.display = 'flex';
+  };
+
+  window.onAppSelect = function(sel) {
+    const nameInput = document.getElementById('modal-rule-name');
+    nameInput.style.display = sel.value === '__other__' ? 'block' : 'none';
+  };
+
+  window.closeRuleModal = function() {
+    document.getElementById('rule-modal').style.display = 'none';
+  };
+
+  window.saveModalRule = function() {
+    const sel = document.getElementById('modal-rule-app');
+    const name = sel.value === '__other__'
+      ? document.getElementById('modal-rule-name').value.trim()
+      : sel.value;
+    const cat = document.getElementById('modal-rule-cat').value;
     if (!name) return;
-    const cat = prompt('Category: blocked / flagged / approved');
-    if (!['blocked','flagged','approved'].includes(cat)) { alert('Must be blocked, flagged, or approved'); return; }
-    const ref = db.collection('families').doc(familyId).collection('children').doc(childId).collection('data').doc('rules');
+    closeRuleModal();
+    const ref = db.collection('families').doc(familyId).collection('children').doc(ruleChildId).collection('data').doc('rules');
     ref.get().then(snap => {
       const apps = snap.exists ? (snap.data().apps||[]) : [];
       apps.push({ appName: name, category: cat });
