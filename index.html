@@ -123,6 +123,36 @@
   db.enableNetwork();
 
   let familyId = null, children = [], childIdx = 0, unsub = null;
+  let autoRefreshTimer = null, activeChildId = null;
+
+  function startAutoRefresh(childId) {
+    stopAutoRefresh();
+    activeChildId = childId;
+    autoRefreshTimer = setInterval(() => {
+      if (!document.hidden) silentRefresh(childId);
+    }, 45000);
+  }
+
+  function stopAutoRefresh() {
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  }
+
+  async function silentRefresh(childId) {
+    try {
+      await db.collection('families').doc(familyId)
+        .collection('children').doc(childId).collection('data').doc('refreshRequest')
+        .set({ requestedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      setTimeout(async () => {
+        const data = await fetchLiveUsage();
+        const el = document.getElementById('live-usage-section');
+        if (el) el.innerHTML = buildUsageHtml(data);
+      }, 3000);
+    } catch (_) {}
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && activeChildId) silentRefresh(activeChildId);
+  });
 
   function show(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -216,7 +246,7 @@
       .catch(e => setMsg('setup-msg', e.message, 'error'));
   }
 
-  function doLogout() { auth.signOut(); }
+  function doLogout() { stopAutoRefresh(); auth.signOut(); }
 
   // ── Children ────────────────────────────────────────────────────────────────
   async function loadChildren() {
@@ -313,8 +343,10 @@
 
   async function renderChild(i) {
     if (unsub) unsub();
+    stopAutoRefresh();
     document.getElementById('main').innerHTML = '<div class="spinner">Loading...</div>';
     const child = children[i];
+    startAutoRefresh(child.id);
 
     // Load everything in parallel
     const [log, liveResult] = await Promise.all([
