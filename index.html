@@ -412,6 +412,29 @@
       });
   }
 
+  function toggleSessions(id) {
+    const el = document.getElementById(id);
+    const arrow = document.getElementById(id + '_arrow');
+    if (!el) return;
+    const open = el.style.display !== 'none';
+    el.style.display = open ? 'none' : 'block';
+    if (arrow) arrow.textContent = open ? '▼' : '▲';
+  }
+
+  function timeDropdown(id, selected, onchange, placeholder) {
+    const opts = [`<option value="">${placeholder}</option>`];
+    for (let h = 0; h < 24; h++) {
+      for (let m of [0, 30]) {
+        const hh = String(h).padStart(2,'0');
+        const mm = String(m).padStart(2,'0');
+        const val = `${hh}:${mm}`;
+        const label = new Date(`2000-01-01T${val}`).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+        opts.push(`<option value="${val}"${selected===val?' selected':''}>${label}</option>`);
+      }
+    }
+    return `<select id="${id}" onchange="${onchange}" style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;color:#333;background:white;">${opts.join('')}</select>`;
+  }
+
   function mergeSessions(sessions) {
     if (!sessions.length) return sessions;
     const sorted = [...sessions].sort((a, b) => a.startMs - b.startMs);
@@ -449,14 +472,12 @@
       <div style="font-size:13px;color:#555;">Total: <strong>${totalStr}</strong></div>
       ${timeStr ? `<div style="font-size:12px;color:#aaa;">Last updated ${dateStr} at ${timeStr}</div>` : ''}
     </div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;background:white;padding:10px 14px;border-radius:10px;">
-      <span style="font-size:12px;color:#888;">🔍 Sessions</span>
-      <input type="time" value="${filterFrom}" onchange="filterFrom=this.value;applyTimeFilter()"
-        style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#333;">
-      <span style="font-size:12px;color:#aaa;">→</span>
-      <input type="time" value="${filterTo}" onchange="filterTo=this.value;applyTimeFilter()"
-        style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#333;">
-      ${filterFrom||filterTo ? `<button onclick="filterFrom='';filterTo='';applyTimeFilter()" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:16px;padding:0 4px;">✕</button>` : ''}
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;background:white;padding:10px 14px;border-radius:10px;flex-wrap:wrap;">
+      <span style="font-size:13px;color:#888;">🔍 Sessions</span>
+      ${timeDropdown('filter-from-sel', filterFrom, 'filterFrom=this.value;applyTimeFilter()', 'From')}
+      <span style="font-size:13px;color:#aaa;">→</span>
+      ${timeDropdown('filter-to-sel', filterTo, 'filterTo=this.value;applyTimeFilter()', 'To')}
+      ${filterFrom||filterTo ? `<button onclick="filterFrom='';filterTo='';document.getElementById('filter-from-sel').value='';document.getElementById('filter-to-sel').value='';applyTimeFilter()" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:16px;padding:0 4px;">✕</button>` : ''}
     </div>`;
 
     function fmt(ms) {
@@ -491,20 +512,27 @@
           const durMs = (s.endMs || Date.now()) - s.startMs;
           const durMins = Math.round(durMs / 60000);
           const dur = durMins >= 60 ? `${Math.floor(durMins/60)}h ${durMins%60}m` : `${durMins}m`;
-          return `${fmt(s.startMs)} – ${end} <span style="color:#bbb;">(${dur})</span>`;
+          return `${fmt(s.startMs)} – ${end} (${dur})`;
         }).join(' &nbsp;·&nbsp; ');
-        sessionsHtml = `<div style="font-size:15px;color:#666;margin-top:6px;line-height:1.6;">${parts}</div>`;
+        sessionsHtml = `<div style="font-size:16px;color:#555;line-height:2.2;">${parts.replace(/ &nbsp;·&nbsp; /g, '<br>')}</div>`;
       }
 
-      appRows.push(`<div style="background:white;border-radius:10px;padding:12px 16px;margin-bottom:6px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
+      const rowId = 'sess_' + a.appName.replace(/\W/g,'');
+      const hasDetail = visibleSessions.length > 0;
+      appRows.push(`<div style="background:white;border-radius:10px;margin-bottom:6px;overflow:hidden;">
+        <div onclick="${hasDetail ? `toggleSessions('${rowId}')` : ''}"
+          style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;${hasDetail?'cursor:pointer;':''}"
+        >
           <span style="font-weight:600;font-size:14px;">${a.appName}</span>
-          <div style="text-align:right;">
-            <span style="color:#888;font-size:13px;">${label}</span>
-            ${dataLabel ? `<span style="color:#aaa;font-size:11px;margin-left:8px;">${dataLabel}</span>` : ''}
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="text-align:right;">
+              <span style="color:#888;font-size:13px;">${label}</span>
+              ${dataLabel ? `<span style="color:#aaa;font-size:11px;margin-left:8px;">${dataLabel}</span>` : ''}
+            </div>
+            ${hasDetail ? `<span id="${rowId}_arrow" style="color:#ccc;font-size:12px;">▼</span>` : ''}
           </div>
         </div>
-        ${sessionsHtml}
+        ${hasDetail ? `<div id="${rowId}" style="display:none;padding:0 16px 12px;border-top:1px solid #f0f0f0;">${sessionsHtml}</div>` : ''}
       </div>`);
     });
     html += appRows.filter(Boolean).join('');
