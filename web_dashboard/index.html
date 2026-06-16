@@ -217,6 +217,10 @@
     const snap = await db.collection('parents').doc(user.uid).get();
     if (!snap.exists) { show('screen-setup'); return; }
     const d = snap.data();
+    // Save email if missing
+    if (!d.email && user.email) {
+      db.collection('parents').doc(user.uid).update({ email: user.email });
+    }
     familyId = d.familyId;
     document.getElementById('greeting').textContent = d.title + ' ' + d.name;
     document.getElementById('code-display').textContent = 'Family code: ' + familyId;
