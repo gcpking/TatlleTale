@@ -113,8 +113,10 @@
 <div id="rule-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px;">
   <div style="background:white;border-radius:20px;padding:28px;width:100%;max-width:360px;">
     <h2 style="font-size:18px;font-weight:700;color:var(--purple);margin-bottom:20px;">Add app rule</h2>
-    <select id="modal-rule-app" onchange="onAppSelect(this)"
-      style="width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:12px;background:white;box-sizing:border-box;">
+    <input id="modal-app-search" placeholder="Search apps..." oninput="filterAppList(this.value)"
+      style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:10px;font-size:14px;margin-bottom:6px;box-sizing:border-box;">
+    <select id="modal-rule-app" onchange="onAppSelect(this)" size="8"
+      style="width:100%;padding:4px;border:1px solid #ddd;border-radius:10px;font-size:14px;margin-bottom:12px;background:white;box-sizing:border-box;height:200px;overflow-y:auto;">
     </select>
     <input id="modal-rule-name" placeholder="Type app name..."
       style="display:none;width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:12px;box-sizing:border-box;">
@@ -639,22 +641,39 @@
 
   let ruleChildId = null;
 
+  window._allAppOptions = [];
+
+  window.filterAppList = function(query) {
+    const sel = document.getElementById('modal-rule-app');
+    sel.innerHTML = '';
+    const q = query.toLowerCase();
+    window._allAppOptions.forEach(({name, isSep}) => {
+      if (isSep) return;
+      if (!q || name.toLowerCase().includes(q)) {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name; sel.appendChild(opt);
+      }
+    });
+    const other = document.createElement('option');
+    other.value = '__other__'; other.textContent = '✏️ Type a name...';
+    sel.appendChild(other);
+  };
+
   window.showAddRule = function(childId) {
     ruleChildId = childId;
+    document.getElementById('modal-app-search').value = '';
     const sel = document.getElementById('modal-rule-app');
     sel.innerHTML = '';
     // Most used today first, then remaining installed apps
     const todayApps = (currentUsageData && currentUsageData.apps || []).map(a => a.appName);
     const installedApps = (window._installedApps || []).map(a => a.appName).filter(n => !todayApps.includes(n)).sort();
-    const allApps = [...todayApps, ...installedApps];
-    if (todayApps.length && installedApps.length) {
-      // Add separator
-      const sep = document.createElement('option');
-      sep.disabled = true; sep.textContent = '── All installed apps ──';
-      allApps.splice(todayApps.length, 0, null); // marker for separator
-    }
-    allApps.forEach(name => {
-      if (name === null) {
+    window._allAppOptions = [
+      ...todayApps.map(n => ({name: n, isSep: false})),
+      ...(todayApps.length && installedApps.length ? [{name:'', isSep:true}] : []),
+      ...installedApps.map(n => ({name: n, isSep: false})),
+    ];
+    window._allAppOptions.forEach(({name, isSep}) => {
+      if (isSep) {
         const sep = document.createElement('option');
         sep.disabled = true; sep.textContent = '── All installed apps ──';
         sel.appendChild(sep); return;
