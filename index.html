@@ -449,17 +449,9 @@
   }
 
   function timeDropdown(id, selected, onchange, placeholder) {
-    const opts = [`<option value="">${placeholder}</option>`];
-    for (let h = 0; h < 24; h++) {
-      for (let m of [0, 30]) {
-        const hh = String(h).padStart(2,'0');
-        const mm = String(m).padStart(2,'0');
-        const val = `${hh}:${mm}`;
-        const label = new Date(`2000-01-01T${val}`).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-        opts.push(`<option value="${val}"${selected===val?' selected':''}>${label}</option>`);
-      }
-    }
-    return `<select id="${id}" onchange="${onchange}" style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;color:#333;background:white;">${opts.join('')}</select>`;
+    return `<input type="time" id="${id}" value="${selected}" placeholder="${placeholder}"
+      onchange="${onchange}"
+      style="padding:6px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;color:#333;background:white;font-family:inherit;">`;
   }
 
   function mergeSessions(sessions) {
@@ -517,8 +509,11 @@
       const h = Math.floor(mins / 60);
       const m = mins % 60;
       const label = h > 0 ? `${h}h ${m}m` : `${mins}m`;
-      const kb = a.dataKb || 0;
-      const dataLabel = kb > 1024 ? `${(kb/1024).toFixed(1)} MB` : kb > 0 ? `${kb} KB` : '';
+      const wifiKb = a.wifiKb || 0;
+      const mobileKb = a.mobileKb || 0;
+      const fmtData = kb => kb > 1024 ? `${(kb/1024).toFixed(1)} MB` : kb > 0 ? `${kb} KB` : '';
+      const wifiLabel = fmtData(wifiKb);
+      const mobileLabel = fmtData(mobileKb);
 
       const fromMs = timeToMs(filterFrom);
       const toMs = timeToMs(filterTo);
@@ -554,7 +549,8 @@
           <div style="display:flex;align-items:center;gap:10px;">
             <div style="text-align:right;">
               <span style="color:#888;font-size:13px;">${label}</span>
-              ${dataLabel ? `<span style="color:#aaa;font-size:11px;margin-left:8px;">${dataLabel}</span>` : ''}
+              ${wifiLabel ? `<span style="color:#6C47FF;font-size:11px;margin-left:6px;">📶 ${wifiLabel}</span>` : ''}
+              ${mobileLabel ? `<span style="color:#22C55E;font-size:11px;margin-left:4px;">📱 ${mobileLabel}</span>` : ''}
             </div>
             ${hasDetail ? `<span id="${rowId}_arrow" style="color:#ccc;font-size:12px;">▼</span>` : ''}
           </div>
@@ -565,6 +561,88 @@
     html += appRows.filter(Boolean).join('');
     return html;
   }
+
+  window.downloadWeekPdf = async function(childId, childName) {
+    // Get Monday of current week
+    const now = new Date();
+    const day = now.getDay(); // 0=Sun
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+    monday.setHours(0,0,0,0);
+
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      days.push(d);
+    }
+
+    // Fetch each day's snapshot from Firestore
+    const dayData = await Promise.all(days.map(async d => {
+      const dateStr = d.toISOString().slice(0,10);
+      try {
+        const snap = await db.collection('families').doc(familyId)
+          .collection('dailyUsage').doc(dateStr).get();
+        const data = snap.exists ? (snap.data()[childId] || null) : null;
+        return { date: d, apps: data?.apps || [] };
+      } catch (_) { return { date: d, apps: [] }; }
+    }));
+
+    // Build PDF HTML
+    const weekStr = `${monday.toLocaleDateString([],{day:'numeric',month:'short'})} – ${days[6].toLocaleDateString([],{day:'numeric',month:'short',year:'numeric'})}`;
+    let body = `<h1 style="color:#6C47FF;margin:0 0 4px;">Tattletale Weekly Report</h1>
+      <p style="color:#888;margin:0 0 24px;">${childName} · ${weekStr}</p>`;
+
+    for (const {date, apps} of dayData) {
+      const dayLabel = date.toLocaleDateString([],{weekday:'long',day:'numeric',month:'short'});
+      const totalMins = apps.reduce((s,a) => s + (a.usageMinutes||0), 0);
+      const totalStr = totalMins >= 60 ? `${Math.floor(totalMins/60)}h ${totalMins%60}m` : `${totalMins}m`;
+      const isToday = date.toDateString() === now.toDateString();
+      const isFuture = date > now && !isToday;
+
+      body += `<div style="margin-bottom:20px;page-break-inside:avoid;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #6C47FF;padding-bottom:4px;margin-bottom:8px;">
+          <strong style="font-size:15px;">${dayLabel}${isToday?' (today)':''}</strong>
+          <span style="color:#6C47FF;font-weight:700;">${isFuture ? '—' : totalStr}</span>
+        </div>`;
+
+      if (isFuture) {
+        body += `<p style="color:#aaa;font-size:13px;margin:4px 0;">Not yet.</p>`;
+      } else if (!apps.length) {
+        body += `<p style="color:#aaa;font-size:13px;margin:4px 0;">No data recorded.</p>`;
+      } else {
+        const top = [...apps].sort((a,b)=>(b.usageMinutes||0)-(a.usageMinutes||0)).slice(0,8);
+        body += `<table style="width:100%;border-collapse:collapse;font-size:13px;">`;
+        top.forEach(a => {
+          const mins = a.usageMinutes || 0;
+          const t = mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : `${mins}m`;
+          const pct = totalMins > 0 ? Math.round(mins/totalMins*100) : 0;
+          const wifi = a.wifiKb > 1024 ? `📶 ${(a.wifiKb/1024).toFixed(1)}MB` : a.wifiKb > 0 ? `📶 ${a.wifiKb}KB` : '';
+          const mob = a.mobileKb > 1024 ? `📱 ${(a.mobileKb/1024).toFixed(1)}MB` : a.mobileKb > 0 ? `📱 ${a.mobileKb}KB` : '';
+          body += `<tr>
+            <td style="padding:4px 0;width:38%;">${a.appName}</td>
+            <td style="width:12%;text-align:right;color:#6C47FF;font-weight:600;">${t}</td>
+            <td style="width:30%;padding:0 10px;">
+              <div style="background:#eee;border-radius:3px;height:6px;">
+                <div style="background:#6C47FF;width:${pct}%;height:6px;border-radius:3px;"></div>
+              </div>
+            </td>
+            <td style="font-size:11px;color:#888;">${wifi}${wifi&&mob?' ':' '}${mob}</td>
+          </tr>`;
+        });
+        body += `</table>`;
+      }
+      body += `</div>`;
+    }
+
+    const win = window.open('', '_blank');
+    win.document.write(`<!DOCTYPE html><html><head><title>Tattletale Weekly — ${childName}</title>
+      <style>body{font-family:sans-serif;padding:32px;max-width:700px;margin:0 auto;color:#333;}
+      @media print{body{padding:16px;}}</style></head>
+      <body>${body}<p style="color:#aaa;font-size:11px;margin-top:32px;text-align:center;">Generated by Tattletale</p>
+      <script>window.onload=()=>window.print();<\/script></body></html>`);
+    win.document.close();
+  };
 
   async function loadLog(childId) {
     const today = new Date().toISOString().slice(0,10);
@@ -600,7 +678,10 @@
 
     // Live usage section
     html += `<div class="section-title">📱 Live usage today
-      <button onclick="requestRefresh('${child.id}')" style="float:right;background:var(--purple);color:white;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">↻ Refresh</button>
+      <div style="float:right;display:flex;gap:8px;">
+        <button onclick="downloadWeekPdf('${child.id}','${child.name || 'Child'}')" style="background:#f0f0ff;color:var(--purple);border:1px solid var(--purple);padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">📥 Week PDF</button>
+        <button onclick="requestRefresh('${child.id}')" style="background:var(--purple);color:white;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">↻ Refresh</button>
+      </div>
     </div>`;
     html += `<div id="live-usage-section">${buildUsageHtml(usageData)}</div>`;
 
