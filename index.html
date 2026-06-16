@@ -65,6 +65,9 @@
     <input id="password" type="password" placeholder="Password">
     <button class="btn" onclick="doLogin()">Sign in</button>
     <button class="btn btn-outline" onclick="showRegister()">Create account</button>
+    <button onclick="doGoogleLogin()" style="width:100%;padding:12px;background:white;border:1px solid #ddd;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:10px;">
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20"> Sign in with Google
+    </button>
     <button onclick="resetPassword()" style="background:none;border:none;color:#888;font-size:13px;cursor:pointer;margin-top:4px;width:100%;">Forgot password?</button>
     <div id="reg-extra" style="display:none; margin-top:16px; border-top:1px solid #eee; padding-top:16px;">
       <input id="reg-name" placeholder="Your name">
@@ -217,6 +220,10 @@
     const snap = await db.collection('parents').doc(user.uid).get();
     if (!snap.exists) { show('screen-setup'); return; }
     const d = snap.data();
+    // Save email if missing
+    if (!d.email && user.email) {
+      db.collection('parents').doc(user.uid).update({ email: user.email });
+    }
     familyId = d.familyId;
     document.getElementById('greeting').textContent = d.title + ' ' + d.name;
     document.getElementById('code-display').textContent = 'Family code: ' + familyId;
@@ -246,6 +253,15 @@
       .catch(e => setMsg('auth-msg', e.message, 'error'));
   }
 
+  async function doGoogleLogin() {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    try {
+      await auth.signInWithPopup(provider);
+    } catch (e) {
+      setMsg('auth-msg', e.message, 'error');
+    }
+  }
+
   function showRegister() {
     document.getElementById('reg-extra').style.display = 'block';
   }
@@ -261,7 +277,7 @@
     auth.createUserWithEmailAndPassword(email, pass)
       .then(async cred => {
         await db.collection('families').doc(code).set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
-        await db.collection('parents').doc(cred.user.uid).set({ name, title, familyId: code });
+        await db.collection('parents').doc(cred.user.uid).set({ name, title, familyId: code, email });
       })
       .catch(e => setMsg('auth-msg', e.message, 'error'));
   }
@@ -274,8 +290,9 @@
     if (!name) { setMsg('setup-msg','Enter your name.','error'); return; }
     setMsg('setup-msg','Saving...','info');
     const uid = auth.currentUser.uid;
+    const email = auth.currentUser?.email || '';
     db.collection('families').doc(code).set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
-      .then(() => db.collection('parents').doc(uid).set({ name, title, familyId: code }))
+      .then(() => db.collection('parents').doc(uid).set({ name, title, familyId: code, email }))
       .catch(e => setMsg('setup-msg', e.message, 'error'));
   }
 
