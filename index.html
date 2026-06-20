@@ -599,12 +599,20 @@
       const dateStr = d.toISOString().slice(0,10);
       const isToday = dateStr === todayStr;
       try {
+        // Try daily snapshot first
         const snap = await db.collection('families').doc(familyId)
           .collection('dailyUsage').doc(dateStr).get();
         const data = snap.exists ? (snap.data()[childId] || null) : null;
         const apps = data?.apps || (isToday ? liveApps : []);
-        return { date: d, apps };
-      } catch (_) { return { date: d, apps: isToday ? liveApps : [] }; }
+
+        // Also load request log for that day
+        const logSnap = await db.collection('families').doc(familyId)
+          .collection('children').doc(childId)
+          .collection('logs').doc(dateStr).get();
+        const entries = logSnap.exists ? (logSnap.data().entries || []) : [];
+
+        return { date: d, apps, entries };
+      } catch (_) { return { date: d, apps: isToday ? liveApps : [], entries: [] }; }
     }));
 
     // Build PDF HTML
@@ -612,7 +620,7 @@
     let body = `<h1 style="color:#6C47FF;margin:0 0 4px;">Tattletale Weekly Report</h1>
       <p style="color:#888;margin:0 0 24px;">${childName} · ${weekStr}</p>`;
 
-    for (const {date, apps} of dayData) {
+    for (const {date, apps, entries} of dayData) {
       const dayLabel = date.toLocaleDateString([],{weekday:'long',day:'numeric',month:'short'});
       const totalMins = apps.reduce((s,a) => s + (a.usageMinutes||0), 0);
       const totalStr = totalMins >= 60 ? `${Math.floor(totalMins/60)}h ${totalMins%60}m` : `${totalMins}m`;
@@ -627,8 +635,18 @@
 
       if (isFuture) {
         body += `<p style="color:#aaa;font-size:13px;margin:4px 0;">Not yet.</p>`;
-      } else if (!apps.length) {
+      } else if (!apps.length && !entries.length) {
         body += `<p style="color:#aaa;font-size:13px;margin:4px 0;">No data recorded.</p>`;
+      } else if (!apps.length && entries.length) {
+        // No usage snapshot but we have request log entries
+        body += `<p style="color:#aaa;font-size:12px;margin:0 0 6px;font-style:italic;">No screen time snapshot — request log below</p>`;
+        body += `<table style="width:100%;border-collapse:collapse;font-size:12px;">`;
+        entries.slice().sort((a,b)=>((a.timestamp?.seconds||0)-(b.timestamp?.seconds||0))).forEach(e => {
+          const outcome = e.outcome || 'pending';
+          const dot = outcome === 'approved' ? '🟢' : outcome === 'denied' ? '🔴' : outcome === 'flagged' ? '🟡' : '⚪';
+          body += `<tr><td style="padding:3px 0;color:#555;">${dot} ${e.text || ''}</td></tr>`;
+        });
+        body += `</table>`;
       } else {
         const top = [...apps].sort((a,b)=>(b.usageMinutes||0)-(a.usageMinutes||0)).slice(0,8);
         body += `<table style="width:100%;border-collapse:collapse;font-size:13px;">`;
@@ -652,6 +670,16 @@
           </tr>`;
         });
         body += `</table>`;
+        // Also show request log if present
+        if (entries.length) {
+          body += `<div style="margin-top:8px;"><p style="color:#aaa;font-size:11px;font-style:italic;margin:4px 0 4px;">Requests:</p><table style="width:100%;border-collapse:collapse;font-size:11px;">`;
+          entries.slice().sort((a,b)=>((a.timestamp?.seconds||0)-(b.timestamp?.seconds||0))).forEach(e => {
+            const outcome = e.outcome || 'pending';
+            const dot = outcome === 'approved' ? '🟢' : outcome === 'denied' ? '🔴' : outcome === 'flagged' ? '🟡' : '⚪';
+            body += `<tr><td style="padding:2px 0;color:#666;">${dot} ${e.text || ''}</td></tr>`;
+          });
+          body += `</table></div>`;
+        }
       }
       body += `</div>`;
     }
